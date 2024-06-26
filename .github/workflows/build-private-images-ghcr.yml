@@ -18,7 +18,7 @@ jobs:
     uses: ./.github/workflows/elixir.yml
   build:
     if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'deploy-to-staging') }}
-    runs-on: buildjet-16vcpu-ubuntu-2204
+    runs-on: ubuntu-latest
     needs: [npm-ci, elixir-ci]
 
     permissions:
