@@ -161,7 +161,7 @@ defmodule Plausible.MixProject do
       {:joken, "~> 2.5"},
       {:paginator, git: "https://github.com/duffelhq/paginator.git"},
       {:esbuild, "~> 0.7", runtime: Mix.env() in [:dev, :ce_dev]},
-      {:tailwind, "~> 0.4.0", runtime: Mix.env() in [:dev, :ce_dev]},
+      {:tailwind, "~> 0.5.1", runtime: Mix.env() in [:dev, :ce_dev]},
       {:ex_json_logger, "~> 1.4.0"},
       {:ecto_network, "~> 1.6.0"},
       {:ex_aws, "~> 2.5"},
