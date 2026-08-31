@@ -36,6 +36,11 @@
       matchManagers: ["mix"],
       matchUpdateTypes: ["major"],
       dependencyDashboardApproval: true,
+      matchManagers: ["mix"],
+      constraints: {
+        elixir: "1.20.4",
+        erlang: "28.5.0.5",
+      },
     },
     {
       // Security PRs for Mix should never wait on the weekly schedule or approval gate above.
