@@ -1,0 +1,57 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+
+  extends: [
+    "config:recommended",
+  ],
+
+  // --- General behavior ---
+  timezone: "Europe/Berlin",
+  schedule: ["before 4am on monday"],
+  dependencyDashboard: true,
+  dependencyDashboardOSVVulnerabilitySummary: "all", // surface OSV-sourced findings even for disabled managers
+  labels: ["dependencies"],
+  prConcurrentLimit: 10,
+  prHourlyLimit: 5,
+
+  vulnerabilityAlerts: {
+    enabled: true,
+    labels: ["security"],
+  },
+
+  osvVulnerabilityAlerts: true,
+
+  packageRules: [
+    {
+      matchManagers: ["npm"],
+      enabled: false,
+    },
+    {
+      matchManagers: ["mix"],
+      enabled: true,
+      groupName: "elixir dependencies",
+      rangeStrategy: "bump",
+    },
+    {
+      matchManagers: ["mix"],
+      matchUpdateTypes: ["major"],
+      dependencyDashboardApproval: true,
+    },
+    {
+      // Security PRs for Mix should never wait on the weekly schedule or approval gate above.
+      matchManagers: ["mix"],
+      matchDatasources: ["hex"],
+      vulnerabilityAlerts: true,
+      schedule: ["at any time"],
+      dependencyDashboardApproval: false,
+      prPriority: 10,
+    },
+  ],
+
+  // Keep mix.lock fresh on a schedule even when mix.exs hasn't changed (catches indirect
+  // dependency drift, useful since osvVulnerabilityAlerts currently misses transitive deps).
+  lockFileMaintenance: {
+    enabled: true,
+    schedule: ["before 4am on monday"],
+  },
+}
