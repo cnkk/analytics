@@ -167,5 +167,5 @@
   "xml_builder": {:hex, :xml_builder, "2.4.0", "b20d23077266c81f593360dc037ea398461dddb6638a329743da6c73afa56725", [:mix], [], "hexpm", "833e325bb997f032b5a1b740d2fd6feed3c18ca74627f9f5f30513a9ae1a232d"},
   "yamerl": {:hex, :yamerl, "0.10.0", "4ff81fee2f1f6a46f1700c0d880b24d193ddb74bd14ef42cb0bcf46e81ef2f8e", [:rebar3], [], "hexpm", "346adb2963f1051dc837a2364e4acf6eb7d80097c0f53cbdc3046ec8ec4b4e6e"},
   "zstream": {:hex, :zstream, "0.6.7", "ae74c7544f4e0563ffbe71324bf1c9bbc0ab33bb580a0ae718da511fb8a5c9d6", [:mix], [], "hexpm", "48c43ae0f00cfcda1ccb69c1d044755663d43b2ee8a0a65763648bf2078d634d"},
-  "zxcvbn": {:git, "https://github.com/techgaun/zxcvbn-elixir.git", "5c9684590f4ecf00af2d391f90db9ce93bd4e996", []},
+  "zxcvbn": {:git, "https://github.com/techgaun/zxcvbn-elixir.git", "198bec36585c9d0891560c46588b8a06e41c21b4", []},
 }
