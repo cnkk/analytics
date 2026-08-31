@@ -106,7 +106,7 @@ defmodule Plausible.MixProject do
       {:nimble_csv, "~> 1.3"},
       {:nimble_totp, "~> 1.0"},
       {:oban, "~> 2.20.1"},
-      {:observer_cli, "~> 1.7"},
+      {:observer_cli, "~> 2.0"},
       {:opentelemetry, "~> 1.7"},
       {:opentelemetry_api, "~> 1.5"},
       {:opentelemetry_api_experimental,
