@@ -98,7 +98,7 @@ defmodule Plausible.MixProject do
       {:fun_with_flags_ui, "~> 1.1"},
       {:locus, "~> 2.3"},
       {:gen_cycle, "~> 1.0.4"},
-      {:hackney, "~> 1.8"},
+      {:hackney, "~> 4.0"},
       {:jason, "~> 1.4"},
       {:location, git: "https://github.com/plausible/location.git"},
       {:mox, "~> 1.3", only: [:test, :ce_test, :e2e_test]},
