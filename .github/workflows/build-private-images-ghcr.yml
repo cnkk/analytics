@@ -46,7 +46,7 @@ jobs:
 
       - name: Build and push
         id: docker_build
-        uses: useblacksmith/build-push-action@ae61d84c78ee061560aeb3cf9ddc12ab3d0cef71 # v2
+        uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2
         with:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
