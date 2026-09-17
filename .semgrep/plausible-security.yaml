@@ -1,0 +1,311 @@
+####################################################################################
+# Plausible security rules — portable pack
+#
+# Runs on Semgrep OSS, Semgrep Pro and Opengrep.
+#
+# Elixir is a Pro-gated language in Semgrep OSS (`languages: [elixir]` rules are
+# skipped with "requires Pro"), so the Elixir rules here are written in `generic`
+# and `regex` mode, which every engine supports. Structural Elixir equivalents
+# live in ./plausible-security-elixir.yaml for Opengrep / Semgrep Pro users.
+#
+# Every rule below was back-tested against the before/after trees of the pull
+# requests named in its metadata. See ./backtest/RESULTS.md.
+####################################################################################
+
+rules:
+  ##################################################################################
+  # 1. Mass assignment of tenancy keys into an Ecto changeset
+  ##################################################################################
+  - id: plausible-ecto-cast-tenant-key
+    languages: [regex]
+    severity: ERROR
+    paths:
+      include:
+        - "lib/**/*.ex"
+      exclude:
+        - "lib/**/*_test.exs"
+    message: >-
+      This changeset casts a tenancy/identity key (`:site_id`, `:team_id` or `:id`)
+      straight out of attacker-controlled params. Anyone who can reach this
+      changeset can add that key to their request body and move the record into
+      another site or team, or overwrite a different row entirely.
+      Set the owning scope from the already-authorized struct instead —
+      `%Schema{site_id: site.id}`, `put_change/3`, `force_change/3` or
+      `put_assoc/3` — and keep it out of the `cast/3` allow-list.
+    metadata:
+      category: security
+      cwe: "CWE-915: Improperly Controlled Modification of Dynamically-Determined Object Attributes"
+      owasp: "A01:2021 - Broken Access Control"
+      confidence: HIGH
+      references:
+        - https://github.com/plausible/analytics/pull/6402
+        - https://github.com/plausible/analytics/pull/6388
+        - https://github.com/plausible/analytics/pull/6396
+      technology: [ecto, phoenix]
+    pattern-either:
+      # cast(attrs, [... :site_id ...]) — inline list, single or multi line
+      - pattern-regex: '\bcast\(\s*[^\n()]*?,\s*\[[^\]]*?(?<![\w.]):(?:site_id|team_id)\b[^\]]*?\]'
+      # cast(attrs, [... :id ...]) — the primary key itself
+      - pattern-regex: '\bcast\(\s*[^\n()]*?,\s*\[\s*(?:[^\]]*?,\s*)?:id\s*[,\]]'
+      # @fields [... :site_id ...] module attribute later handed to cast/3
+      - pattern-regex: '@(?![a-z_]*required)[a-z_]*fields?[a-z_]*\s+\[[^\]]*?(?<![\w.]):(?:site_id|team_id)\b[^\]]*?\]'
+      - pattern-regex: '@(?![a-z_]*required)[a-z_]*fields?[a-z_]*\s+\[\s*(?:[^\]]*?,\s*)?:id\s*[,\]]'
+
+  ##################################################################################
+  # 2. Mass assignment of a cross-resource foreign key
+  ##################################################################################
+  - id: plausible-ecto-cast-foreign-key
+    languages: [regex]
+    severity: WARNING
+    paths:
+      include:
+        - "lib/**/*.ex"
+    message: >-
+      This changeset casts a foreign key (`:*_id`) from user params. Unless the
+      referenced row is re-fetched and confirmed to live inside the caller's
+      site/team, a user can point this record at somebody else's resource.
+      Resolve the id against the authorized scope first
+      (`Repo.get_by(Schema, id: id, site_id: site.id)`) and then `put_change/3`
+      the result, rather than casting the raw id.
+    metadata:
+      category: security
+      cwe: "CWE-639: Authorization Bypass Through User-Controlled Key"
+      owasp: "A01:2021 - Broken Access Control"
+      confidence: MEDIUM
+      references:
+        - https://github.com/plausible/analytics/pull/6449
+      technology: [ecto, phoenix]
+    pattern-either:
+      - pattern-regex: '\bcast\(\s*[^\n()]*?,\s*\[[^\]]*?(?<![\w.]):(?:segment_id|funnel_id|goal_id|import_id|invitation_id|subscription_id|enterprise_plan_id)\b[^\]]*?\]'
+      - pattern-regex: '@(?![a-z_]*required)[a-z_]*fields?[a-z_]*\s+\[[^\]]*?(?<![\w.]):(?:segment_id|funnel_id|goal_id|import_id|invitation_id|subscription_id|enterprise_plan_id)\b[^\]]*?\]'
+
+  ##################################################################################
+  # 3. Mass assignment of a capability token / immutable identifier
+  ##################################################################################
+  - id: plausible-ecto-cast-capability-token
+    languages: [regex]
+    severity: ERROR
+    paths:
+      include:
+        - "lib/**/*.ex"
+    message: >-
+      This changeset casts a secret or immutable identifier (`:slug`, `:token`,
+      `:api_key`, ...) from user params. For a shared link the slug *is* the
+      bearer credential in `?auth=`, so a castable slug lets a user overwrite
+      another link's secret, or pin a link to a guessable value, long after
+      creation. Generate the value once on insert and leave it out of `cast/3`.
+    metadata:
+      category: security
+      cwe: "CWE-915: Improperly Controlled Modification of Dynamically-Determined Object Attributes"
+      owasp: "A01:2021 - Broken Access Control"
+      confidence: HIGH
+      references:
+        - https://github.com/plausible/analytics/pull/6449
+      technology: [ecto, phoenix]
+    pattern-either:
+      - pattern-regex: '\bcast\(\s*[^\n()]*?,\s*\[[^\]]*?(?<![\w.]):(?:slug|api_key|api_key_hash|key_hash|token|secret|salt|totp_token|invitation_id)\b[^\]]*?\]'
+      - pattern-regex: '@(?![a-z_]*required)[a-z_]*fields?[a-z_]*\s+\[[^\]]*?(?<![\w.]):(?:slug|api_key|api_key_hash|key_hash|token|secret|salt|totp_token)\b[^\]]*?\]'
+
+  ##################################################################################
+  # 4. Tenant-scoped record fetched without the tenant filter (IDOR)
+  ##################################################################################
+  - id: plausible-repo-lookup-missing-tenant-scope
+    languages: [regex]
+    severity: ERROR
+    paths:
+      include:
+        - "lib/**/*.ex"
+    message: >-
+      A site-scoped schema is fetched by a user-supplied key with no `site_id` /
+      `team_id` in the lookup. The record is then acted on as if it belonged to
+      the current site, so passing somebody else's slug or id reaches their row
+      (IDOR). Add the owning scope to the query itself, e.g.
+      `Repo.get_by(SharedLink, slug: slug, site_id: site.id)`, and handle `nil`.
+    metadata:
+      category: security
+      cwe: "CWE-639: Authorization Bypass Through User-Controlled Key"
+      owasp: "A01:2021 - Broken Access Control"
+      confidence: MEDIUM
+      references:
+        - https://github.com/plausible/analytics/pull/6402
+        - https://github.com/plausible/analytics/pull/6388
+      technology: [ecto, phoenix, liveview]
+    pattern-either:
+      # Repo.get_by(Plausible.Site.SharedLink, slug: slug)  — schema as first arg.
+      # The `\w+\s*:` requirement keeps lookups whose filters are built elsewhere
+      # (e.g. `Repo.get_by!(Goal, get_params)`) out: their scoping is not visible
+      # here, so flagging them is guesswork.
+      - pattern-regex: '\bRepo\.get_by!?\(\s*(?:Plausible\.)?(?:Site\.SharedLink|SharedLink|Segments\.Segment|Segment|Goal|Funnel|Shield\.\w+Rule|Site\.GoogleAuth|Imported\.\w+)\s*,(?![^)]*\b(?:site_id|team_id)\b)[^)]*\w+\s*:[^)]*\)'
+      # Schema |> Repo.get_by(slug: slug)  — schema piped in
+      - pattern-regex: '\|>\s*(?:[\w.]+\.)?Repo\.get_by!?\((?![^)]*\b(?:site_id|team_id)\b)[^)]*\b(?:slug|external_id|identifier|api_key|token)\s*:'
+
+  ##################################################################################
+  # 5. OAuth `state` trusted without a signature
+  ##################################################################################
+  - id: plausible-oauth-state-unsigned
+    languages: [regex]
+    severity: ERROR
+    paths:
+      include:
+        - "lib/**/*.ex"
+    message: >-
+      The OAuth `state` parameter is decoded and trusted without verifying a
+      signature. `state` round-trips through the provider and the user's browser,
+      so an attacker can rewrite it — here it carries `site_id`, which means a
+      forged `state` binds the OAuth grant to a site the user does not own.
+      Sign it on the way out and verify on the way back
+      (`Phoenix.Token.sign/verify`), then still re-authorize the decoded
+      `site_id` against the current user.
+    metadata:
+      category: security
+      cwe: "CWE-352: Cross-Site Request Forgery (CSRF)"
+      owasp: "A01:2021 - Broken Access Control"
+      confidence: HIGH
+      references:
+        - https://github.com/plausible/analytics/pull/6396
+        - https://github.com/plausible/analytics/pull/6388
+      technology: [oauth, phoenix]
+    pattern-either:
+      # a "state" param is pattern-matched out of the request and then decoded
+      - pattern-regex: '(?s)"state"\s*=>\s*(\w+)\b.{0,600}?\bJason\.decode!?\(\s*\1\s*\)'
+      # state is built with a plain JSON encode instead of a signed token
+      - pattern-regex: '&state=(?:"|\x27)?\s*<>\s*Jason\.encode!\('
+
+  ##################################################################################
+  # 6. Server-rendered HTML built by Elixir string interpolation
+  ##################################################################################
+  - id: plausible-elixir-html-interpolation
+    languages: [regex]
+    severity: ERROR
+    paths:
+      include:
+        - "lib/**/*.ex"
+    message: >-
+      HTML is being assembled with Elixir string interpolation (`#{...}`) and the
+      interpolated value is not escaped. Unlike `~H`/HEEx, a plain string or
+      heredoc performs no escaping, so a user-controlled name renders as live
+      markup — stored XSS, and in the CRM/admin views it fires in a super-admin's
+      session. Wrap the value in `Phoenix.HTML.html_escape/1` (+
+      `safe_to_string/1`), or build the markup with `~H`.
+    metadata:
+      category: security
+      cwe: "CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"
+      owasp: "A03:2021 - Injection"
+      confidence: MEDIUM
+      references:
+        - https://github.com/plausible/analytics/pull/5321
+      technology: [phoenix, elixir]
+    patterns:
+      # "<tag ...> text #{value}" — an interpolation in HTML text content.
+      # The opening `<tag` is required: matching a bare `>` also matches every
+      # `->` in the codebase.
+      - pattern-regex: '<\s*[a-zA-Z][\w:-]*(?:\s[^<>\n]*)?>[^<>\n]{0,80}#\{[^}\n]*\}'
+      # ...unless the interpolated expression is run through an escaper.
+      - pattern-not-regex: '#\{[^}\n]*(?:html_escape|safe_to_string|escape_html|Jason\.encode|URI\.encode|Phoenix\.HTML)[^}\n]*\}'
+
+  ##################################################################################
+  # 7. JavaScript literal built by Elixir string interpolation
+  ##################################################################################
+  - id: plausible-elixir-js-literal-interpolation
+    languages: [regex]
+    severity: ERROR
+    paths:
+      include:
+        - "lib/**/*.ex"
+    message: >-
+      A JavaScript value is being built by interpolating an Elixir expression
+      inside JS quotes (`'#{...}'`). A single apostrophe in the interpolated
+      value closes the JS string and the rest is parsed as code — this is the
+      Alpine `x-data` XSS fixed in #6386. Serialize with `Jason.encode!/1` and
+      splice the resulting JSON in, rather than hand-quoting.
+    metadata:
+      category: security
+      cwe: "CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"
+      owasp: "A03:2021 - Injection"
+      confidence: HIGH
+      references:
+        - https://github.com/plausible/analytics/pull/6386
+      technology: [phoenix, elixir, alpinejs]
+    patterns:
+      # `key: '#{value}'` — a JS/JSON object property whose value is hand-quoted.
+      # Anchoring on the property name keeps ordinary Elixir log messages such as
+      # `"Error refreshing '#{cache_name}'"` out of the results.
+      - pattern-regex: '(?<![\w.:])[A-Za-z_$][\w$]*\s*:\s*\x27#\{[^}\n]*\}\x27'
+      - pattern-not-regex: '#\{[^}\n]*(?:Jason\.encode|html_escape|safe_to_string|URI\.encode)[^}\n]*\}'
+
+  ##################################################################################
+  # 8. Unescaped interpolation into innerHTML
+  ##################################################################################
+  - id: plausible-js-innerhtml-unescaped-label
+    languages: [javascript, typescript]
+    severity: ERROR
+    paths:
+      include:
+        - "assets/js/**"
+        - "tracker/src/**"
+    message: >-
+      A user-controlled label/name/title is interpolated into a template literal
+      that is assigned to `innerHTML`. Goal, funnel-step and segment names come
+      from other members of the site, so this renders their markup in the
+      viewer's session (stored XSS) — the funnel-tooltip bug fixed in #6181.
+      Escape the value first (`escapeHTML(...)`), or build the node with
+      `textContent`/`createTextNode` instead of `innerHTML`.
+    metadata:
+      category: security
+      cwe: "CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"
+      owasp: "A03:2021 - Injection"
+      confidence: MEDIUM
+      references:
+        - https://github.com/plausible/analytics/pull/6181
+      technology: [javascript, react]
+    patterns:
+      - pattern-either:
+          - pattern: $EL.innerHTML = `...`
+          - pattern: $EL.outerHTML = `...`
+          - pattern: $EL.insertAdjacentHTML($POS, `...`)
+      # Fire only when some interpolation reads like user-controlled text AND
+      # that same interpolation is not passed through an escaper. The negative
+      # lookahead is scoped to the one `${...}` being examined, so escaping one
+      # value does not excuse leaving the next one raw.
+      - pattern-regex: '\$\{(?![^}]*(?:escapeHTML|escape_html|escapeHtml|sanitize|DOMPurify|encodeURI|JSON\.stringify))[^}]*\b(?:label|title|name|displayName|display_name|description|domain|email|username|goal|prop|segment)\b[^}]*\}'
+
+  ##################################################################################
+  # 9. LiveView route relying only on router plugs for authorization
+  ##################################################################################
+  - id: plausible-liveview-route-missing-live-session
+    languages: [generic]
+    severity: WARNING
+    paths:
+      include:
+        - "lib/**/router.ex"
+        - "lib/**/router/*.ex"
+    options:
+      generic_ellipsis_max_span: 500
+    message: >-
+      This `live` route is not wrapped in a `live_session ... on_mount:` block,
+      so the only authorization it has is the router's `pipe_through` pipeline.
+      Router plugs run for the first HTTP render only — the WebSocket `mount/3`
+      and every subsequent `handle_event/3` bypass them, so a client that keeps
+      (or re-opens) the socket keeps the privileges it had at connect time.
+      Put the route in a `live_session` with an `on_mount` hook that re-checks
+      authorization, as #6417 did for `/cs` and #6646 for `/register`.
+    metadata:
+      category: security
+      cwe: "CWE-862: Missing Authorization"
+      owasp: "A01:2021 - Broken Access Control"
+      confidence: MEDIUM
+      references:
+        - https://github.com/plausible/analytics/pull/6417
+        - https://github.com/plausible/analytics/pull/6646
+        - https://github.com/plausible/analytics/pull/6638
+        - https://hexdocs.pm/phoenix_live_view/security-model.html
+      technology: [phoenix, liveview]
+    patterns:
+      - pattern: live ...
+      # `live` also appears as a path segment (e.g. get "/health/live"); a real
+      # route macro has whitespace then the path string.
+      - pattern-regex: 'live\s+"'
+      - pattern-not-inside: |
+          live_session ... do
+          ...
+          end

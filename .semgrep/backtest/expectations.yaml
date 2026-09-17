@@ -1,0 +1,170 @@
+# What each pull request is expected to prove about the ruleset.
+#
+#   detects: rules that must fire on the PR's own changed files before the fix,
+#            and whose finding count on those files must drop after it
+#   silent:  rules that must not fire on the PR's changed files in either tree
+#
+# The `silent` lists are the interesting half. Each of these PRs fixes exactly
+# one vulnerability class, so every rule aimed at a different class has to stay
+# quiet on the same files. That is what stops a rule from being widened until it
+# matches everything and still "passes".
+#
+# `head` is the PR's head commit. The harness reverse-applies the PR's own diff
+# onto it to reconstruct the vulnerable tree.
+
+prs:
+  - pr: 5321
+    title: Escape team name in CRM
+    head: 874dbf834278410d85226938e43b27092e2fbdfb
+    detects:
+      - plausible-elixir-html-interpolation
+    silent:
+      - plausible-ecto-cast-tenant-key
+      - plausible-ecto-cast-foreign-key
+      - plausible-ecto-cast-capability-token
+      - plausible-repo-lookup-missing-tenant-scope
+      - plausible-oauth-state-unsigned
+      - plausible-elixir-js-literal-interpolation
+      - plausible-js-innerhtml-unescaped-label
+      - plausible-liveview-route-missing-live-session
+
+  - pr: 6181
+    title: Escape goal name in the funnel tooltip to prevent XSS
+    head: 237592d8289acf2a61b999b286562ae43d5434f3
+    detects:
+      - plausible-js-innerhtml-unescaped-label
+    silent:
+      - plausible-ecto-cast-tenant-key
+      - plausible-ecto-cast-foreign-key
+      - plausible-ecto-cast-capability-token
+      - plausible-repo-lookup-missing-tenant-scope
+      - plausible-oauth-state-unsigned
+      - plausible-elixir-html-interpolation
+      - plausible-elixir-js-literal-interpolation
+      - plausible-liveview-route-missing-live-session
+
+  - pr: 6386
+    title: Add proper escaping to goal (Alpine x-data)
+    head: 4709518a63eb3f414946490bd3d4e8830af3a331
+    detects:
+      - plausible-elixir-js-literal-interpolation
+    silent:
+      - plausible-ecto-cast-tenant-key
+      - plausible-ecto-cast-foreign-key
+      - plausible-ecto-cast-capability-token
+      - plausible-repo-lookup-missing-tenant-scope
+      - plausible-oauth-state-unsigned
+      - plausible-elixir-html-interpolation
+      - plausible-js-innerhtml-unescaped-label
+      - plausible-liveview-route-missing-live-session
+
+  - pr: 6388
+    title: Fix cross tenant changes
+    head: c836ebe961fd4ecee9ff447712796a7a4d8710f7
+    detects:
+      - plausible-ecto-cast-tenant-key
+      - plausible-repo-lookup-missing-tenant-scope
+      - plausible-oauth-state-unsigned
+      - plausible-elixir-js-literal-interpolation
+    silent:
+      - plausible-ecto-cast-foreign-key
+      - plausible-ecto-cast-capability-token
+      - plausible-elixir-html-interpolation
+      - plausible-js-innerhtml-unescaped-label
+      - plausible-liveview-route-missing-live-session
+
+  - pr: 6396
+    title: Refactor Google OAuth callbacks
+    head: f7bd6d945b5e666e944a65474eae9239a5928e52
+    detects:
+      - plausible-ecto-cast-tenant-key
+      - plausible-oauth-state-unsigned
+    silent:
+      - plausible-ecto-cast-foreign-key
+      - plausible-ecto-cast-capability-token
+      - plausible-repo-lookup-missing-tenant-scope
+      - plausible-elixir-html-interpolation
+      - plausible-elixir-js-literal-interpolation
+      - plausible-js-innerhtml-unescaped-label
+      - plausible-liveview-route-missing-live-session
+
+  - pr: 6402
+    title: Refactor passing params to structs during provisioning
+    head: 5dc57c4ef0a3f00a903f1b5787ad4fc06bd6407d
+    detects:
+      - plausible-ecto-cast-tenant-key
+      - plausible-repo-lookup-missing-tenant-scope
+    silent:
+      - plausible-ecto-cast-foreign-key
+      - plausible-ecto-cast-capability-token
+      - plausible-oauth-state-unsigned
+      - plausible-elixir-html-interpolation
+      - plausible-elixir-js-literal-interpolation
+      - plausible-js-innerhtml-unescaped-label
+      - plausible-liveview-route-missing-live-session
+
+  - pr: 6417
+    title: Live session (super-admin on_mount for /cs and /flags)
+    head: d7ff59c333363a98a9bb7bdf6efd8d06ed984411
+    detects:
+      - plausible-liveview-route-missing-live-session
+    silent:
+      - plausible-ecto-cast-tenant-key
+      - plausible-ecto-cast-foreign-key
+      - plausible-ecto-cast-capability-token
+      - plausible-repo-lookup-missing-tenant-scope
+      - plausible-oauth-state-unsigned
+      - plausible-elixir-html-interpolation
+      - plausible-elixir-js-literal-interpolation
+      - plausible-js-innerhtml-unescaped-label
+
+  - pr: 6449
+    title: Fix sharedlink (segment scoping + immutable slug)
+    head: 2ba6a2a3f98dd5e5bfac8f41b72649247117198d
+    detects:
+      - plausible-ecto-cast-capability-token
+      - plausible-ecto-cast-foreign-key
+    silent:
+      - plausible-ecto-cast-tenant-key
+      - plausible-repo-lookup-missing-tenant-scope
+      - plausible-oauth-state-unsigned
+      - plausible-elixir-html-interpolation
+      - plausible-elixir-js-literal-interpolation
+      - plausible-js-innerhtml-unescaped-label
+      - plausible-liveview-route-missing-live-session
+
+  - pr: 6646
+    title: Enforce DISABLE_REGISTRATION in LiveView too
+    head: cda34bb263d584da0e70de4828423f0d8f551fd7
+    detects:
+      - plausible-liveview-route-missing-live-session
+    silent:
+      - plausible-ecto-cast-tenant-key
+      - plausible-ecto-cast-foreign-key
+      - plausible-ecto-cast-capability-token
+      - plausible-repo-lookup-missing-tenant-scope
+      - plausible-oauth-state-unsigned
+      - plausible-elixir-html-interpolation
+      - plausible-elixir-js-literal-interpolation
+      - plausible-js-innerhtml-unescaped-label
+
+  # 6638 is the one PR in this set that no rule can score, and that is the point.
+  # It was closed in favour of 6646: it re-checked DISABLE_REGISTRATION inside the
+  # `handle_event/3` handlers but left the routes registered outside any
+  # `live_session`, so nothing changed at the router — the only place a static
+  # rule can see this class. The whole ruleset is therefore expected to stay
+  # silent across its diff. See RESULTS.md.
+  - pr: 6638
+    title: Enforce DISABLE_REGISTRATION (closed, superseded by 6646)
+    head: cf5cbb39abfc870b355eb1b6f4334fd0171e7b45
+    detects: []
+    silent:
+      - plausible-ecto-cast-tenant-key
+      - plausible-ecto-cast-foreign-key
+      - plausible-ecto-cast-capability-token
+      - plausible-repo-lookup-missing-tenant-scope
+      - plausible-oauth-state-unsigned
+      - plausible-elixir-html-interpolation
+      - plausible-elixir-js-literal-interpolation
+      - plausible-js-innerhtml-unescaped-label
+      - plausible-liveview-route-missing-live-session

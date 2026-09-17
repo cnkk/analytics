@@ -1,0 +1,65 @@
+name: Security rules
+
+on:
+  pull_request:
+  push:
+    branches: [master, stable]
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install semgrep
+
+      # The portable pack runs on Semgrep OSS. Elixir is a Pro-gated language, so
+      # .semgrep/plausible-security-elixir.yaml is deliberately not scanned here —
+      # see .semgrep/README.md.
+      - name: Scan
+        run: |
+          semgrep \
+            --metrics=off \
+            --error \
+            --config .semgrep/plausible-security.yaml \
+            lib assets/js tracker/src
+
+  backtest:
+    name: Rule back-test
+    runs-on: ubuntu-latest
+    # Only when the rules themselves change: the harness fetches ten pull request
+    # patches from github.com, which is wasted work on an ordinary code PR.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install semgrep
+
+      - name: Did the rules change?
+        id: changed
+        run: |
+          if git diff --quiet origin/${{ github.base_ref }}...HEAD -- .semgrep; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Replay the rules against the pull requests that motivated them
+        if: steps.changed.outputs.run == 'true'
+        run: python3 .semgrep/backtest/backtest.py

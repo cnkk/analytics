@@ -1,0 +1,181 @@
+####################################################################################
+# Plausible security rules — structural Elixir pack
+#
+# REQUIRES Opengrep, or Semgrep with the Pro engine.
+#
+# Elixir is one of the two languages (with Apex) that Semgrep OSS refuses to run:
+#
+#     $ semgrep --config plausible-security-elixir.yaml lib/
+#     Warning: N rule(s) were skipped because they require Pro (try `--pro`)
+#
+# The rules in ../plausible-security.yaml cover the same vulnerability classes in
+# `generic` and `regex` mode so that they run on every engine, and those are the
+# ones the back-test exercises. The rules here are the same checks expressed
+# against the Elixir AST: they understand pipelines, ignore comments and string
+# contents, and do not care how the code is wrapped by the formatter.
+#
+# NOTE ON VERIFICATION: these rules could not be executed where they were
+# written, because only Semgrep OSS was available there. They are reviewed and
+# schema-valid but, unlike the portable pack, they are NOT back-test verified.
+# Run `.semgrep/backtest/backtest.py` with SEMGREP_BIN pointed at an `opengrep`
+# binary and RULES switched to this file before trusting them in CI.
+####################################################################################
+
+rules:
+  - id: plausible-ecto-cast-tenant-key-ast
+    languages: [elixir]
+    severity: ERROR
+    message: >-
+      This changeset casts a tenancy/identity key (`:site_id`, `:team_id`, `:id`)
+      out of user-controlled params, so the owning scope of the row can be set by
+      the request. Assign it from the authorized struct instead —
+      `%Schema{site_id: site.id}`, `put_change/3`, `force_change/3` or
+      `put_assoc/3`.
+    metadata:
+      category: security
+      cwe: "CWE-915: Improperly Controlled Modification of Dynamically-Determined Object Attributes"
+      owasp: "A01:2021 - Broken Access Control"
+      confidence: HIGH
+      references:
+        - https://github.com/plausible/analytics/pull/6402
+        - https://github.com/plausible/analytics/pull/6388
+        - https://github.com/plausible/analytics/pull/6396
+      technology: [ecto, phoenix]
+    pattern-either:
+      - pattern: cast($ATTRS, [..., :site_id, ...])
+      - pattern: cast($ATTRS, [..., :team_id, ...])
+      - pattern: cast($ATTRS, [..., :id, ...])
+      - pattern: cast($CS, $ATTRS, [..., :site_id, ...])
+      - pattern: cast($CS, $ATTRS, [..., :team_id, ...])
+      - pattern: cast($CS, $ATTRS, [..., :id, ...])
+
+  - id: plausible-ecto-cast-capability-token-ast
+    languages: [elixir]
+    severity: ERROR
+    message: >-
+      This changeset casts a secret or immutable identifier from user params. A
+      shared link's `:slug` is the bearer credential in `?auth=`; letting it be
+      cast means it can be overwritten or pinned to a chosen value after
+      creation. Generate it once on insert and keep it out of `cast/3`.
+    metadata:
+      category: security
+      cwe: "CWE-915: Improperly Controlled Modification of Dynamically-Determined Object Attributes"
+      owasp: "A01:2021 - Broken Access Control"
+      confidence: HIGH
+      references:
+        - https://github.com/plausible/analytics/pull/6449
+      technology: [ecto, phoenix]
+    pattern-either:
+      - pattern: cast($ATTRS, [..., :slug, ...])
+      - pattern: cast($ATTRS, [..., :api_key, ...])
+      - pattern: cast($ATTRS, [..., :token, ...])
+      - pattern: cast($CS, $ATTRS, [..., :slug, ...])
+      - pattern: cast($CS, $ATTRS, [..., :api_key, ...])
+      - pattern: cast($CS, $ATTRS, [..., :token, ...])
+
+  - id: plausible-repo-lookup-missing-tenant-scope-ast
+    languages: [elixir]
+    severity: ERROR
+    message: >-
+      A site-scoped schema is fetched without `site_id` / `team_id` in the
+      lookup, so a user-supplied slug or id reaches another site's row (IDOR).
+      Put the owning scope in the query and handle the `nil` result.
+    metadata:
+      category: security
+      cwe: "CWE-639: Authorization Bypass Through User-Controlled Key"
+      owasp: "A01:2021 - Broken Access Control"
+      confidence: MEDIUM
+      references:
+        - https://github.com/plausible/analytics/pull/6402
+        - https://github.com/plausible/analytics/pull/6388
+      technology: [ecto, phoenix, liveview]
+    patterns:
+      - pattern-either:
+          - pattern: Repo.get_by($SCHEMA, ...)
+          - pattern: Repo.get_by!($SCHEMA, ...)
+          - pattern: $M.Repo.get_by($SCHEMA, ...)
+          - pattern: $M.Repo.get_by!($SCHEMA, ...)
+      - metavariable-regex:
+          metavariable: $SCHEMA
+          regex: '.*(SharedLink|Segment|Goal|Funnel|Rule|GoogleAuth|Imported).*'
+      - pattern-not: 'Repo.get_by(..., site_id: ..., ...)'
+      - pattern-not: 'Repo.get_by!(..., site_id: ..., ...)'
+      - pattern-not: '$M.Repo.get_by(..., site_id: ..., ...)'
+      - pattern-not: '$M.Repo.get_by!(..., site_id: ..., ...)'
+      - pattern-not: 'Repo.get_by(..., team_id: ..., ...)'
+      - pattern-not: '$M.Repo.get_by(..., team_id: ..., ...)'
+
+  - id: plausible-oauth-state-unsigned-ast
+    languages: [elixir]
+    severity: ERROR
+    message: >-
+      The OAuth `state` parameter is decoded and trusted without a signature.
+      `state` round-trips through the provider and the browser, so a forged value
+      binds the grant to a site the user does not own. Sign it with
+      `Phoenix.Token.sign/verify` and still re-authorize the decoded `site_id`
+      against the current user.
+    metadata:
+      category: security
+      cwe: "CWE-352: Cross-Site Request Forgery (CSRF)"
+      owasp: "A01:2021 - Broken Access Control"
+      confidence: HIGH
+      references:
+        - https://github.com/plausible/analytics/pull/6396
+        - https://github.com/plausible/analytics/pull/6388
+      technology: [oauth, phoenix]
+    patterns:
+      - pattern-inside: |
+          def $CALLBACK($CONN, %{..., "state" => $STATE, ...}) do
+            ...
+          end
+      - pattern-either:
+          - pattern: Jason.decode!($STATE)
+          - pattern: Jason.decode($STATE)
+      - pattern-not-inside: |
+          ...
+          Phoenix.Token.verify(...)
+          ...
+
+  # Only expressible structurally: this is the gap PR #6638 tried to close in the
+  # handlers and PR #6646 closed properly at the router.
+  - id: plausible-liveview-handle-event-unguarded-write-ast
+    languages: [elixir]
+    severity: WARNING
+    message: >-
+      This `handle_event/3` writes to the database without an authorization or
+      feature check in the same clause. Router plugs do not run for LiveView
+      events, so whatever the pipeline enforced at the initial HTTP render is not
+      enforced here. Re-check the condition in the handler, or move the route
+      into a `live_session` with an `on_mount` hook.
+    metadata:
+      category: security
+      cwe: "CWE-862: Missing Authorization"
+      owasp: "A01:2021 - Broken Access Control"
+      confidence: LOW
+      references:
+        - https://github.com/plausible/analytics/pull/6638
+        - https://github.com/plausible/analytics/pull/6646
+        - https://hexdocs.pm/phoenix_live_view/security-model.html
+      technology: [phoenix, liveview]
+    patterns:
+      - pattern-inside: |
+          def handle_event($EVENT, $PARAMS, $SOCKET) do
+            ...
+          end
+      - pattern-either:
+          - pattern: Repo.insert(...)
+          - pattern: Repo.insert!(...)
+          - pattern: Repo.update(...)
+          - pattern: Repo.update!(...)
+          - pattern: Repo.delete(...)
+          - pattern: Repo.delete!(...)
+      - pattern-not-inside: |
+          ...
+          $GUARD?(...)
+          ...
+      - pattern-not-inside: |
+          ...
+          case $CHECK(...) do
+            ...
+          end
+          ...
