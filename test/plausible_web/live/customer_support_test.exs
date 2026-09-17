@@ -4,7 +4,7 @@ defmodule PlausibleWeb.Live.CustomerSupportTest do
   @moduletag :ee_only
 
   on_ee do
-    @cs_index Routes.customer_support_path(PlausibleWeb.Endpoint, :index)
+    @cs_index "/cs"
 
     import Phoenix.LiveViewTest
 
@@ -40,6 +40,33 @@ defmodule PlausibleWeb.Live.CustomerSupportTest do
         assert_search_result(resp, "team", team.id)
         assert_search_result(resp, "user", user.id)
         refute_search_result(resp, "site", consolidated_site.id)
+      end
+
+      test "shows a pending-deletion badge for a team with an active schedule", %{
+        conn: conn,
+        user: user
+      } do
+        team = team_of(user)
+        insert(:team_deletion_schedule, team: team, status: :scheduled)
+
+        conn = get(conn, @cs_index)
+        resp = html_response(conn, 200)
+
+        assert text_of_element(resp, ~s|a[data-test-type="team"][data-test-id="#{team.id}"]|) =~
+                 "🧨"
+      end
+
+      test "does not show a pending-deletion badge for a team without one", %{
+        conn: conn,
+        user: user
+      } do
+        team = team_of(user)
+
+        conn = get(conn, @cs_index)
+        resp = html_response(conn, 200)
+
+        refute text_of_element(resp, ~s|a[data-test-type="team"][data-test-id="#{team.id}"]|) =~
+                 "🧨"
       end
 
       test "filters as you type", %{conn: conn, site: site, user: user} do
@@ -203,12 +230,14 @@ defmodule PlausibleWeb.Live.CustomerSupportTest do
     defp assert_search_result(doc, type, id) do
       assert link = find(doc, ~s|a[data-test-type="#{type}"][data-test-id="#{id}"]|)
 
-      assert text_of_attr(link, "href") ==
-               apply(Routes, :"customer_support_#{type}_path", [
-                 PlausibleWeb.Endpoint,
-                 :show,
-                 id
-               ])
+      expected_href =
+        case type do
+          "site" -> ~p"/cs/sites/site/#{id}"
+          "team" -> ~p"/cs/teams/team/#{id}"
+          "user" -> ~p"/cs/users/user/#{id}"
+        end
+
+      assert text_of_attr(link, "href") == expected_href
     end
 
     defp refute_search_result(doc, type, id) do

@@ -113,8 +113,7 @@ defmodule PlausibleWeb.Router do
   scope "/.well-known", PlausibleWeb do
     pipe_through :external_api
 
-    get "/oauth-protected-resource", OAuth.MetadataController, :protected_resource
-    get "/oauth-protected-resource/mcp", OAuth.MetadataController, :protected_resource
+    get "/oauth-protected-resource/mcp", OAuth.MetadataController, :mcp_protected_resource
 
     get "/oauth-authorization-server", OAuth.MetadataController, :authorization_server
   end
@@ -438,21 +437,26 @@ defmodule PlausibleWeb.Router do
     scope alias: Live, assigns: %{connect_live_socket: true} do
       pipe_through [PlausibleWeb.RequireLoggedOutPlug, :app_layout]
 
-      scope assigns: %{disable_registration_for: [:invite_only, true]} do
+      scope assigns: %{registration_context: :default} do
         pipe_through PlausibleWeb.Plugs.MaybeDisableRegistration
 
-        live "/register", RegisterForm, :register_form, as: :auth
+        live_session :default, on_mount: PlausibleWeb.Live.RegistrationContext do
+          live "/register", RegisterForm, :register_form, as: :auth
+        end
       end
 
       scope assigns: %{
-              disable_registration_for: true,
+              registration_context: :invitation,
               dogfood_page_path: "/register/invitation/:invitation_id"
             } do
         pipe_through PlausibleWeb.Plugs.MaybeDisableRegistration
 
-        live "/register/invitation/:invitation_id",
-             RegisterForm,
-             :register_from_invitation_form, as: :auth
+        live_session :invitation,
+          on_mount: {PlausibleWeb.Live.RegistrationContext, :invitation} do
+          live "/register/invitation/:invitation_id",
+               RegisterForm,
+               :register_from_invitation_form, as: :auth
+        end
       end
     end
 
@@ -461,6 +465,8 @@ defmodule PlausibleWeb.Router do
     post "/activate", AuthController, :activate
     get "/login", AuthController, :login_form
     post "/login", AuthController, :login
+
+    get "/invitation-expired", AuthController, :invitation_expired
 
     get "/login/oauth/authorize", OAuth.AuthorizeController, :authorize_form
     post "/login/oauth/authorize", OAuth.AuthorizeController, :authorize
@@ -499,8 +505,8 @@ defmodule PlausibleWeb.Router do
   scope "/", PlausibleWeb do
     pipe_through [:shared_link]
 
-    get "/share/:domain/*path", StatsController, :shared_link
     post "/share/:slug/authenticate", StatsController, :authenticate_shared_link
+    get "/share/:domain/*path", StatsController, :shared_link, warn_on_verify: true
   end
 
   scope "/settings", PlausibleWeb do
@@ -627,16 +633,16 @@ defmodule PlausibleWeb.Router do
     scope alias: Live, assigns: %{connect_live_socket: true} do
       pipe_through [:app_layout, PlausibleWeb.RequireAccountPlug]
 
-      live_session :onboarding, on_mount: PlausibleWeb.Live.OnboardingLayoutContext do
-        scope assigns: %{
-                dogfood_page_path: "/:website/installation"
-              } do
-          live "/:domain/installation",
-               Installation,
-               :installation,
-               as: :site,
-               container: {:div, class: "flex-1 flex flex-col"}
-        end
+      scope assigns: %{
+              dogfood_page_path: "/:website/installation",
+              bg_class: "bg-white dark:bg-gray-950",
+              legacy_layout?: false
+            } do
+        live "/:domain/installation",
+             Installation,
+             :installation,
+             as: :site,
+             container: {:div, class: "h-full"}
       end
 
       scope assigns: %{
@@ -662,7 +668,7 @@ defmodule PlausibleWeb.Router do
     put "/:domain/settings/google", SiteController, :update_google_auth
     delete "/:domain/settings/google-search", SiteController, :delete_google_auth
     delete "/:domain/settings/google-import", SiteController, :delete_google_auth
-    delete "/:domain", SiteController, :delete_site
+    delete "/:domain", SiteController, :delete_site, warn_on_verify: true
     delete "/:domain/stats", SiteController, :reset_stats
 
     get "/:domain/import/google-analytics/property",
@@ -735,8 +741,8 @@ defmodule PlausibleWeb.Router do
 
       put "/:domain/settings", SiteController, :update_settings
 
-      get "/:domain", StatsController, :stats
-      get "/:domain/*path", StatsController, :stats
+      get "/:domain", StatsController, :stats, warn_on_verify: true
+      get "/:domain/*path", StatsController, :stats, warn_on_verify: true
     end
   end
 end

@@ -53,17 +53,17 @@ defmodule PlausibleWeb.Layouts do
         <div data-iframe-height></div>
         <script
           type="text/javascript"
-          src={Routes.static_path(PlausibleWeb.Endpoint, "/js/embed.content.js")}
+          src={~p"/js/embed.content.js"}
         >
         </script>
       <% end %>
       <.footer :if={@footer?} />
-      <script type="text/javascript" src={Routes.static_path(PlausibleWeb.Endpoint, "/js/app.js")}>
+      <script type="text/javascript" src={~p"/js/app.js"}>
       </script>
       <%= if @load_dashboard_js? do %>
         <script
           type="text/javascript"
-          src={Routes.static_path(PlausibleWeb.Endpoint, "/js/dashboard.js")}
+          src={~p"/js/dashboard.js"}
         >
         </script>
       <% end %>
@@ -132,6 +132,35 @@ defmodule PlausibleWeb.Layouts do
           </p>
         </div>
         {render_slot(@inner_block)}
+      </div>
+    </.app>
+    """
+  end
+
+  attr :current_user, :any, default: nil
+  attr :current_step, :string, required: true
+  attr :flash, :map, default: %{}
+  slot :inner_block, required: true
+
+  def onboarding(assigns) do
+    ~H"""
+    <.app
+      footer?={false}
+      global_notices?={false}
+      trial_badge?={false}
+      current_user={@current_user}
+      flash={@flash}
+    >
+      <div class="flex-1 flex flex-col">
+        <div class="flex-1">
+          {render_slot(@inner_block)}
+        </div>
+        <div class="pb-20 flex justify-center">
+          <PlausibleWeb.Components.FlowProgress.render
+            steps={PlausibleWeb.Flows.onboarding_steps()}
+            current_step={@current_step}
+          />
+        </div>
       </div>
     </.app>
     """
