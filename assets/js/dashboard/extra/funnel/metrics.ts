@@ -1,3 +1,5 @@
+import { RevenueMetricValue } from '../../api'
+
 type FunnelStep = {
   label: string
   visitors: number
@@ -5,11 +7,11 @@ type FunnelStep = {
   dropoff_percentage: string
   conversion_rate: string
   conversion_rate_step: string
+  revenue?: RevenueMetricValue | null
+  revenue_per_visitor?: RevenueMetricValue | null
 }
 
-export type FunnelResponse = {
-  name: string
-  strict_order: boolean
+type FunnelPeriod = {
   steps: FunnelStep[]
   all_visitors: number
   entering_visitors: number
@@ -18,24 +20,43 @@ export type FunnelResponse = {
   never_entering_visitors_percentage: string
 }
 
-type StepOutcome = {
+export type FunnelResponse = FunnelPeriod & {
+  name: string
+  strict_order: boolean
+  comparison?: FunnelPeriod | null
+  date_range?: [string, string]
+  comparison_date_range?: [string, string] | null
+}
+
+export type StepOutcome = {
   visitors: number
   rate: string
 }
 
-export type StepMetrics = {
-  label: string
+export type StepValues = {
   visitors: number
   conversionRate: string
   continued: StepOutcome
   droppedOff: StepOutcome
+  revenue: RevenueMetricValue | null
+  revenuePerVisitor: RevenueMetricValue | null
 }
 
-export function stepMetrics(funnel: FunnelResponse): StepMetrics[] {
-  return funnel.steps.map((step, index) => ({
-    label: step.label,
+export type StepMetrics = StepValues & {
+  label: string
+  comparison: StepValues | null
+}
+
+function stepValues(
+  funnel: FunnelPeriod,
+  step: FunnelStep,
+  index: number
+): StepValues {
+  return {
     visitors: step.visitors,
     conversionRate: step.conversion_rate,
+    revenue: step.revenue ?? null,
+    revenuePerVisitor: step.revenue_per_visitor ?? null,
     continued:
       index === 0
         ? {
@@ -50,5 +71,29 @@ export function stepMetrics(funnel: FunnelResponse): StepMetrics[] {
             rate: funnel.never_entering_visitors_percentage
           }
         : { visitors: step.dropoff, rate: step.dropoff_percentage }
-  }))
+  }
+}
+
+export function conversionRateChange(
+  current: string,
+  previous: string
+): number {
+  return Math.round((Number(current) - Number(previous)) * 10) / 10
+}
+
+export function stepMetrics(funnel: FunnelResponse): StepMetrics[] {
+  const previous = funnel.comparison
+
+  return funnel.steps.map((step, index) => {
+    const previousStep = previous?.steps[index]
+
+    return {
+      label: step.label,
+      ...stepValues(funnel, step, index),
+      comparison:
+        previous && previousStep
+          ? stepValues(previous, previousStep, index)
+          : null
+    }
+  })
 }

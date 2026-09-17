@@ -6,7 +6,7 @@ defmodule PlausibleWeb.Live.Installation do
   use Plausible
   use PlausibleWeb, :live_view
 
-  alias PlausibleWeb.Flows
+  alias PlausibleWeb.{Flows, Layouts}
   alias Phoenix.LiveView.AsyncResult
   alias PlausibleWeb.Live.Installation.Icons
   alias PlausibleWeb.Live.Installation.Instructions
@@ -93,7 +93,6 @@ defmodule PlausibleWeb.Live.Installation do
        site: site,
        flow: flow,
        return_to: params["return_to"],
-       current_step: "Install Plausible",
        heading: heading,
        subtitle: subtitle
      )}
@@ -117,7 +116,11 @@ defmodule PlausibleWeb.Live.Installation do
     assigns = assign(assigns, :submit_button_text, @submit_button_text)
 
     ~H"""
-    <div>
+    <.onboarding_or_app_layout {assigns}>
+      <PlausibleWeb.Components.Site.NewSiteForm.heading_and_subtitle
+        heading={@heading}
+        subtitle={@subtitle}
+      />
       <div class="flex flex-col gap-10 w-full max-w-md mx-auto mt-10 pb-16 px-4 text-gray-900 dark:text-gray-100">
         <.async_result :let={recommended_installation_type} assign={@recommended_installation_type}>
           <:loading>
@@ -233,7 +236,7 @@ defmodule PlausibleWeb.Live.Installation do
           </.focus_list>
         </div>
       </div>
-    </div>
+    </.onboarding_or_app_layout>
     """
   end
 
@@ -323,6 +326,35 @@ defmodule PlausibleWeb.Live.Installation do
     end
   end
 
+  defp onboarding_or_app_layout(assigns) do
+    if assigns.flow == Flows.register() do
+      ~H"""
+      <Layouts.onboarding
+        current_step={Flows.installation_step()}
+        current_user={@current_user}
+        flash={@flash}
+      >
+        {render_slot(@inner_block)}
+      </Layouts.onboarding>
+      """
+    else
+      ~H"""
+      <Layouts.app
+        footer?={false}
+        global_notices?={false}
+        current_user={@current_user}
+        current_team={@current_team}
+        current_team_role={@current_team_role}
+        teams={@teams}
+        my_team={@my_team}
+        flash={@flash}
+      >
+        {render_slot(@inner_block)}
+      </Layouts.app>
+      """
+    end
+  end
+
   attr :flow, :string, required: true
   attr :return_to, :string, default: nil
   attr :domain, :string, required: true
@@ -332,20 +364,16 @@ defmodule PlausibleWeb.Live.Installation do
       cond do
         assigns.return_to == "dashboard" ->
           {"Back to dashboard",
-           Routes.stats_path(PlausibleWeb.Endpoint, :stats, assigns.domain,
-             verify_installation: true,
-             flow: assigns.flow
-           )}
+           stats_path(assigns.domain, verify_installation: true, flow: assigns.flow)}
 
         assigns.flow == Flows.review() ->
-          {"Back to settings",
-           Routes.site_path(PlausibleWeb.Endpoint, :settings_general, assigns.domain)}
+          {"Back to settings", ~p"/#{assigns.domain}/settings/general"}
 
         assigns.flow == Flows.provisioning() ->
-          {"Back to sites", Routes.site_path(PlausibleWeb.Endpoint, :index)}
+          {"Back to sites", ~p"/sites"}
 
         true ->
-          {"Skip", Routes.site_path(PlausibleWeb.Endpoint, :index)}
+          {"Skip", ~p"/sites"}
       end
 
     assigns = assign(assigns, label: label, href: href)
@@ -388,12 +416,9 @@ defmodule PlausibleWeb.Live.Installation do
 
     destination =
       on_ee do
-        Routes.stats_path(socket, :stats, domain,
-          verify_installation: true,
-          flow: socket.assigns.flow
-        )
+        stats_path(domain, verify_installation: true, flow: socket.assigns.flow)
       else
-        Routes.stats_path(socket, :stats, domain, [])
+        stats_path(domain)
       end
 
     {:noreply, redirect(socket, to: destination)}

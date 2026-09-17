@@ -4,6 +4,8 @@ defmodule PlausibleWeb.Email do
   """
 
   use Plausible
+  use PlausibleWeb.VerifiedRoutes
+
   import Bamboo.Email
   import Bamboo.PostmarkHelper
 
@@ -508,11 +510,7 @@ defmodule PlausibleWeb.Email do
       end
 
     download_url =
-      PlausibleWeb.Router.Helpers.site_url(
-        PlausibleWeb.Endpoint,
-        :download_export,
-        site.domain
-      ) <> "?__team=#{site.team.identifier}"
+      url(~p"/#{site.domain}/download/export?#{[__team: site.team.identifier]}")
 
     priority_email()
     |> to(user)
@@ -556,11 +554,12 @@ defmodule PlausibleWeb.Email do
     |> render("approaching_accept_traffic_until.html",
       time: "next week",
       user: %{email: notification.email, name: notification.name},
-      team: notification.team
+      team: notification.team,
+      deletion_date: nil
     )
   end
 
-  def approaching_accept_traffic_until_tomorrow(notification) do
+  def approaching_accept_traffic_until_tomorrow(notification, deletion_date \\ nil) do
     base_email()
     |> to(notification.email)
     |> tag("drop-traffic-warning-final")
@@ -568,7 +567,41 @@ defmodule PlausibleWeb.Email do
     |> render("approaching_accept_traffic_until.html",
       time: "tomorrow",
       user: %{email: notification.email, name: notification.name},
-      team: notification.team
+      team: notification.team,
+      deletion_date: deletion_date
+    )
+  end
+
+  def deletion_full_notice_email(user, team, schedule, sites_summary) do
+    days = Plausible.Teams.DeletionSchedule.first_notice_before_deletion_days()
+
+    base_email()
+    |> to(user)
+    |> tag("deletion-full-notice")
+    |> subject("Your Plausible dashboards and stats will be deleted in #{days} days")
+    |> render("deletion_full_notice_email.html",
+      user: user,
+      team: team,
+      category: schedule.category,
+      deletion_date: schedule.deletion_date,
+      sites_summary: sites_summary
+    )
+  end
+
+  def deletion_reminder_email(user, team, schedule, sites_summary) do
+    days = Plausible.Teams.DeletionSchedule.reminder_before_deletion_days()
+
+    base_email()
+    |> to(user)
+    |> tag("deletion-reminder")
+    |> subject(
+      "Final notice: your Plausible dashboards and stats will be deleted in #{days} days"
+    )
+    |> render("deletion_reminder_email.html",
+      user: user,
+      team: team,
+      deletion_date: schedule.deletion_date,
+      sites_summary: sites_summary
     )
   end
 
