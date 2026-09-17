@@ -154,38 +154,43 @@ defmodule Plausible.SemgrepFindingsVerificationTest do
   end
 
   ##############################################################################
-  # FINDING 3 — lib/plausible_web/router.ex:444 and :453  (/register)
-  # rule: plausible-liveview-route-missing-live-session   expected verdict: REAL
+  # FINDING 3 — /register   FIXED UPSTREAM by #6646, now a regression test
+  #
+  # Before master was merged into this branch, /register sat outside any
+  # live_session and RegisterForm re-checked nothing, so a socket connected
+  # while registration was enabled kept working after the flag was turned on.
+  # The merge brought PR #6646, which wraps the route in
+  # `live_session :default, on_mount: PlausibleWeb.Live.RegistrationContext`.
+  # Semgrep no longer reports the route. This test pins the fix.
   ##############################################################################
-  describe "FINDING 3 router.ex:444,453 /register outside a live_session" do
-    test "REAL: DISABLE_REGISTRATION is enforced by the router plug only, not by the socket",
-         %{conn: conn} do
-      # A user exists, so this is not a first-launch instance.
+  describe "FINDING 3 /register is now inside a live_session" do
+    test "FIXED: the socket refuses to register once DISABLE_REGISTRATION is set", %{conn: conn} do
       new_user()
 
-      # 1. While registration is enabled, a client renders the page and connects
-      #    the LiveView socket. The router plug runs exactly once, here.
       lv = get_liveview(conn, "/register")
 
-      # 2. The instance now disables registration.
       put_selfhost_env(disable_registration: true)
 
-      # 3. The HTTP route is correctly blocked from this point on.
       blocked = get(build_conn(), "/register")
       assert redirected_to(blocked) == "/login"
 
-      # 4. The already-connected socket is never re-checked: handle_event/3 does
-      #    not consult the flag, so registration still succeeds over the socket.
       mock_captcha_success()
 
       type_into_input(lv, "user[name]", "Socket Attacker")
       type_into_input(lv, "user[email]", "socket.attacker@plausible.test")
       type_into_input(lv, "user[password]", "very-long-and-very-secret-123")
 
-      lv |> element("form") |> render_submit()
+      # The handler now re-checks the flag itself and redirects to /login, so the
+      # submit may either return a redirect or exit the view. Either is fine; what
+      # matters is that no account is created.
+      try do
+        lv |> element("form") |> render_submit()
+      catch
+        :exit, _ -> :ok
+      end
 
-      assert Repo.get_by(Plausible.Auth.User, email: "socket.attacker@plausible.test"),
-             "expected the account to be created despite registration being disabled"
+      refute Repo.get_by(Plausible.Auth.User, email: "socket.attacker@plausible.test"),
+             "the socket path must not create an account while registration is disabled"
     end
   end
 
@@ -334,10 +339,10 @@ defmodule Plausible.SemgrepFindingsVerificationTest do
   end
 
   ##############################################################################
-  # FINDING 8 — lib/plausible_web/controllers/stats_controller.ex:268
+  # FINDING 8 — lib/plausible_web/controllers/stats_controller.ex:267
   # rule: plausible-repo-lookup-missing-tenant-scope   expected verdict: FALSE POSITIVE
   ##############################################################################
-  describe "FINDING 8 stats_controller.ex:268 Repo.get_by(SharedLink, slug: slug)" do
+  describe "FINDING 8 stats_controller.ex:267 Repo.get_by(SharedLink, slug: slug)" do
     test "FALSE POSITIVE: the slug is the credential, and it only unlocks its own site", %{
       conn: conn
     } do
@@ -362,10 +367,10 @@ defmodule Plausible.SemgrepFindingsVerificationTest do
   end
 
   ##############################################################################
-  # FINDING 9 — lib/plausible_web/router.ex:603,604,645,646
+  # FINDING 9 — lib/plausible_web/router.ex:609,610,641,651,652
   # rule: plausible-liveview-route-missing-live-session  expected verdict: NOT EXPLOITABLE
   ##############################################################################
-  describe "FINDING 9 router.ex:603,604,645,646 live routes outside a live_session" do
+  describe "FINDING 9 router.ex:609,610,641,651,652 live routes outside a live_session" do
     setup [:create_user, :log_in, :create_site]
 
     test "NOT EXPLOITABLE: ChangeDomain re-authorizes the site in mount/3, not in the pipeline",
@@ -376,6 +381,16 @@ defmodule Plausible.SemgrepFindingsVerificationTest do
       # If the rule's claim held, this would render the victim's site.
       assert_raise Ecto.NoResultsError, fn ->
         live(conn, "/#{victim_site.domain}/change-domain")
+      end
+    end
+
+    test "NOT EXPLOITABLE: Installation re-authorizes the site in mount/3 as well", %{conn: conn} do
+      # router.ex:641 is newly flagged after the onboarding refactor moved this
+      # route out of live_session :onboarding.
+      victim_site = new_site(owner: new_user())
+
+      assert_raise Ecto.NoResultsError, fn ->
+        live(conn, "/#{victim_site.domain}/installation")
       end
     end
 

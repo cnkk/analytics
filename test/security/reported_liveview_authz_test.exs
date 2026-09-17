@@ -18,7 +18,7 @@ defmodule Plausible.ReportedLiveViewAuthzTest do
 
   alias Plausible.Repo
 
-  defp team_general_path, do: Routes.settings_path(PlausibleWeb.Endpoint, :team_general)
+  defp team_general_path, do: ~p"/settings/team/general"
   defp subscription_path, do: "/settings/billing/subscription"
 
   defp secret_key_base do
@@ -51,69 +51,56 @@ defmodule Plausible.ReportedLiveViewAuthzTest do
 
   ##############################################################################
   # REPORT A — team_management.ex:275 "update-team"
+  #
+  # The report was accurate for the tree it was written against: handle_event
+  # "update-team" renamed the current team with no role check, while the same
+  # write over HTTP is guarded by AuthorizeTeamAccess [:owner, :admin], and the
+  # settings form is readonly/disabled below that bar. A viewer and an editor
+  # were each shown renaming the team over the socket.
+  #
+  # Merging master into this branch removed that handler entirely (#6666, "New
+  # team setup UI"). The tests below pin the current state: no LiveView renames
+  # a team outside the owner-only setup flow, and the HTTP endpoint still
+  # enforces its roles.
   ##############################################################################
-  describe "REPORT A team_management.ex:275 update-team has no role check" do
+  describe "REPORT A team_management.ex update-team, after the master merge" do
     setup [:create_user, :log_in, :create_team, :setup_team]
 
-    test "CONFIRMED: a viewer renames the team through the LiveView event", %{team: team} do
+    test "FIXED: TeamManagement no longer handles an update-team event at all", %{team: team} do
       viewer = add_member(team, role: :viewer)
-      original_name = team.name
-
-      conn = log_in_as(Phoenix.ConnTest.build_conn(), viewer, team)
-
-      # The viewer can load the settings page that live_renders TeamManagement.
-      assert conn |> get(team_general_path()) |> html_response(200)
+      original_name = Repo.reload!(team).name
 
       conn = log_in_as(Phoenix.ConnTest.build_conn(), viewer, team)
       conn = assign(conn, :live_module, PlausibleWeb.Live.TeamManagement)
       {:ok, lv, _html} = live(conn, team_general_path())
 
-      # A forged event: no DOM control is required to push it.
-      render_hook(lv, "update-team", %{"team" => %{"name" => "Owned By Viewer"}})
+      # The forged event that used to rename the team now matches no clause, so
+      # the view crashes instead of writing. Trap the linked exit.
+      Process.flag(:trap_exit, true)
 
-      renamed = Repo.reload!(team)
+      assert catch_exit(render_hook(lv, "update-team", %{"team" => %{"name" => "Owned By Viewer"}}))
 
-      assert renamed.name == "Owned By Viewer",
-             "expected a viewer to be able to rename the team via the LiveView event"
-
-      refute renamed.name == original_name
-    end
-
-    test "CONTRAST: the equivalent HTTP endpoint rejects the same viewer", %{team: team} do
-      viewer = add_member(team, role: :viewer)
-      original_name = Repo.reload!(team).name
-
-      conn = log_in_as(Phoenix.ConnTest.build_conn(), viewer, team)
-
-      result = post(conn, "/settings/team/general/name", %{"team" => %{"name" => "Owned By HTTP"}})
-
-      # AuthorizeTeamAccess, [:owner, :admin] guards this action.
-      assert result.status in [302, 404]
       assert Repo.reload!(team).name == original_name
     end
 
-    test "CONTRAST: an editor is also below the role bar the HTTP endpoint enforces", %{
-      team: team
-    } do
-      editor = add_member(team, role: :editor)
+    test "the HTTP endpoint still rejects a viewer and an editor", %{team: team} do
       original_name = Repo.reload!(team).name
 
-      conn = log_in_as(Phoenix.ConnTest.build_conn(), editor, team)
+      for role <- [:viewer, :editor] do
+        member = add_member(team, role: role)
+        conn = log_in_as(Phoenix.ConnTest.build_conn(), member, team)
 
-      result =
-        post(conn, "/settings/team/general/name", %{"team" => %{"name" => "Owned By Editor"}})
+        result =
+          post(conn, "/settings/team/general/name", %{"team" => %{"name" => "Owned By #{role}"}})
 
-      assert result.status in [302, 404]
-      assert Repo.reload!(team).name == original_name
+        assert result.status in [302, 404]
+        assert Repo.reload!(team).name == original_name
+      end
+    end
 
-      # ... yet the same editor renames the team over the socket.
-      conn = log_in_as(Phoenix.ConnTest.build_conn(), editor, team)
-      conn = assign(conn, :live_module, PlausibleWeb.Live.TeamManagement)
-      {:ok, lv, _html} = live(conn, team_general_path())
-
-      render_hook(lv, "update-team", %{"team" => %{"name" => "Owned By Editor LV"}})
-
-      assert Repo.reload!(team).name == "Owned By Editor LV"
+    test "an owner can still rename the team over HTTP", %{conn: conn, team: team} do
+      post(conn, "/settings/team/general/name", %{"team" => %{"name" => "Renamed By Owner"}})
+      assert Repo.reload!(team).name == "Renamed By Owner"
     end
   end
 
